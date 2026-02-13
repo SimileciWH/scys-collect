@@ -34,6 +34,23 @@ const targets = [
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 function norm(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function resolveLikeUrl(raw, base) {
+  const v = String(raw || '').trim();
+  if (!v || v.startsWith('javascript:') || v === '#') return '';
+  if (/^https?:\/\//i.test(v)) return v;
+  if (v.startsWith('//')) return `https:${v}`;
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(v)) return v;
+  try { return new URL(v, base).toString(); } catch (_) { return ''; }
+}
+function normalizeUrlText(v) {
+  return String(v || '').trim().replace(/[)\]>,，。；;]+$/g, '');
+}
+function isFeishuUrl(v) {
+  const u = normalizeUrlText(v);
+  if (!u || u.includes('...')) return false;
+  if (!/^(https?:\/\/|lark:|feishu:)/i.test(u)) return false;
+  return /(feishu|lark)/i.test(u);
+}
 function extractDatetime(text) {
   const m = norm(text).match(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{2}/);
   if (!m) return '';
@@ -46,7 +63,104 @@ function extractRegion(text) {
 }
 function extractFeishu(text) {
   const m = text.match(/https?:\/\/[^\s"']*(?:feishu|lark)[^\s"']*/i);
-  return m ? m[0] : '';
+  const u = m ? normalizeUrlText(m[0]) : '';
+  return isFeishuUrl(u) ? u : '';
+}
+
+async function tryOpenAuthorDetail(context, articlePage, authorName) {
+  const clickSelectors = [
+    '.post-item-top-left img',
+    '.name-identity .name',
+    '.name-identity',
+    '.post-item-top-right img',
+    '.post-item-top-left',
+    '.post-item-top-right',
+    'img[alt*="头像"]'
+  ];
+  const previousUrl = articlePage.url();
+
+  for (let round = 0; round < 5; round++) {
+    try {
+      const candidates = [];
+      if (authorName) {
+        candidates.push(articlePage.getByText(authorName, { exact: true }).first());
+        candidates.push(articlePage.locator(`xpath=(//*[contains(@class,"post-item-top")]//*[normalize-space(text())="${authorName}"])[1]`));
+      }
+      for (const sel of clickSelectors) candidates.push(articlePage.locator(sel).first());
+
+      for (const target of candidates) {
+        if ((await target.count()) === 0) continue;
+        const popupPromise = context.waitForEvent('page', { timeout: 3500 }).catch(() => null);
+        await target.click({ force: true, timeout: 2500 }).catch(() => {});
+        const popup = await popupPromise;
+        if (popup) {
+          await popup.waitForLoadState('domcontentloaded').catch(() => {});
+          return { mode: 'popup', page: popup, previousUrl };
+        }
+        await articlePage.waitForURL((u) => u.toString() !== previousUrl, { timeout: 2500 }).catch(() => {});
+        if (articlePage.url() !== previousUrl) {
+          return { mode: 'same-tab', page: articlePage, previousUrl };
+        }
+      }
+    } catch (_) {}
+    await sleep(250);
+  }
+  return null;
+}
+
+async function captureUrlByClick(context, page, locator) {
+  const href = await locator.getAttribute('href').catch(() => '');
+  const hrefUrl = resolveLikeUrl(href, page.url());
+  if (isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
+
+  const before = page.url();
+  const popupPromise = context.waitForEvent('page', { timeout: 4500 }).catch(() => null);
+  await locator.click({ force: true, timeout: 2500 }).catch(() => {});
+  const popup = await popupPromise;
+  if (popup) {
+    await popup.waitForLoadState('domcontentloaded').catch(() => {});
+    await sleep(1200);
+    const popped = popup.url();
+    await popup.close().catch(() => {});
+    const u = resolveLikeUrl(popped, before);
+    return normalizeUrlText(u || '');
+  }
+
+  await page.waitForURL((u) => u.toString() !== before, { timeout: 3000 }).catch(() => {});
+  if (page.url() !== before) {
+    const jumped = page.url();
+    const u = resolveLikeUrl(jumped, before);
+    await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
+    await sleep(500);
+    return normalizeUrlText(u || '');
+  }
+  return '';
+}
+
+async function extractFeishuByDomOrClick(context, articlePage, bodyText) {
+  const textMatch = extractFeishu(bodyText);
+  if (textMatch) return textMatch;
+
+  const nearLabel = articlePage.locator('xpath=(//*[contains(normalize-space(.),"飞书链接")]//a)[1] | (//*[contains(normalize-space(.),"飞书链接")]/following::a[1])').first();
+  if (await nearLabel.count()) {
+    const u = await captureUrlByClick(context, articlePage, nearLabel);
+    if (isFeishuUrl(u)) return normalizeUrlText(u);
+  }
+
+  const feishuAnchors = articlePage.locator('a[href*="feishu"], a[href*="lark"], a:has-text("飞书"), a:has-text("云文档")');
+  const n = await feishuAnchors.count();
+  for (let i = 0; i < Math.min(n, 5); i++) {
+    const u = await captureUrlByClick(context, articlePage, feishuAnchors.nth(i));
+    if (isFeishuUrl(u)) return normalizeUrlText(u);
+  }
+
+  const anyAnchor = articlePage.locator('a').filter({ hasText: /飞书|云文档/i }).first();
+  if (await anyAnchor.count()) {
+    const u = await captureUrlByClick(context, articlePage, anyAnchor);
+    if (isFeishuUrl(u)) return normalizeUrlText(u);
+  }
+
+  return '';
 }
 
 async function getArticleData(context, target) {
@@ -60,32 +174,23 @@ async function getArticleData(context, target) {
   const author = target.author;
 
   const publishDate = extractDatetime(bodyText);
-  const feishuLink = extractFeishu(bodyText);
+  const feishuLink = await extractFeishuByDomOrClick(context, page, bodyText);
 
   let region = '暂时不知';
   if (author) {
-    const nameNode = page.getByText(author, { exact: false }).first();
-    if (await nameNode.count()) {
-      const clickTarget = nameNode.locator('xpath=ancestor::*[contains(@class,"name-identity") or contains(@class,"post-item-top-right")][1]');
-      const target = (await clickTarget.count()) ? clickTarget.first() : nameNode;
-      const prev = page.url();
-      const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
-      await target.click({ force: true }).catch(() => {});
-      const popup = await popupPromise;
-      if (popup) {
-        await popup.waitForLoadState('domcontentloaded').catch(() => {});
-        await sleep(1500);
-        const t = await popup.locator('body').innerText().catch(() => '');
-        region = extractRegion(t);
-        await popup.close().catch(() => {});
-      } else {
-        await page.waitForURL(u => u.toString() !== prev, { timeout: 5000 }).catch(() => {});
-        const t = await page.locator('body').innerText().catch(() => '');
-        region = extractRegion(t);
-        if (page.url() !== articleLink) {
-          await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
-          await sleep(800);
-        }
+    const opened = await tryOpenAuthorDetail(context, page, author);
+    if (opened && opened.mode === 'popup') {
+      await sleep(1200);
+      const t = await opened.page.locator('body').innerText().catch(() => '');
+      region = extractRegion(t);
+      await opened.page.close().catch(() => {});
+    } else if (opened && opened.mode === 'same-tab') {
+      await sleep(1200);
+      const t = await page.locator('body').innerText().catch(() => '');
+      region = extractRegion(t);
+      if (page.url() !== opened.previousUrl) {
+        await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
+        await sleep(800);
       }
     }
   }
@@ -125,7 +230,7 @@ async function submitOne(page, row) {
   await fillTextField(page, '文章链接', row.articleLink);
   await fillTextField(page, '飞书链接', row.feishuLink || '');
 
-  const submit = page.getByText('Submit', { exact: false }).first();
+  const submit = page.getByRole('button', { name: /提交|submit/i }).first();
   const enabled = await submit.isEnabled().catch(() => false);
   if (!enabled) throw new Error('Submit disabled');
   await submit.click({ timeout: 10000 });
