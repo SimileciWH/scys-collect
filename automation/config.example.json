@@ -1,0 +1,51 @@
+{
+  "scysCollectionUrl": "https://scys.com/content/collection?id=...",
+  "feishuFormUrl": "https://...",
+  "userDataDir": "./user_data",
+  "useChromeProfile": false,
+  "useSavedStorageState": false,
+  "chromeUserDataDir": "~/Library/Application Support/Google/Chrome",
+  "chromeProfileDirectory": "Default",
+  "chromeProfileCloneDir": "./chrome_profile_clone",
+  "storageStatePath": "./storage_state.json",
+  "headless": false,
+  "slowMoMs": 120,
+  "manualLoginWait": true,
+  "manualLoginHint": "Please login in the opened browser, then press Enter here.",
+  "outputCsvPath": "./output/records.csv",
+  "outputJsonlPath": "./output/records.jsonl",
+  "dedupeKey": "articleLink",
+  "expand": {
+    "enabled": true,
+    "maxClicks": 50,
+    "buttonTexts": ["展开", "展开全部", "查看更多", "显示更多", "更多"]
+  },
+  "selectors": {
+    "sections": ".card",
+    "sectionTitle": ".title > span:first-child",
+    "card": ".card-child",
+    "cardTitle": ".leftTitle span",
+    "cardAuthor": ".leftName .name span",
+    "cardDate": ".leftName .times span",
+    "cardLink": "a",
+    "articleTitle": "h1, .article-title, .post-title",
+    "articleAuthor": ".author, .user, .nickname, a[href*='user']",
+    "articleDate": "time, .date, .time",
+    "articleContent": "article, .article-content, .post-content, .content",
+    "authorLink": "a[href*='user'], a[href*='profile']",
+    "authorRegionLabelTexts": ["地区", "所在地", "城市"],
+    "authorRegionValue": ".value, .content, .info, .profile-item",
+    "feishuLinkRegex": "https?:\\/\\/[^\\s\"']*(feishu|lark)[^\\s\"']*",
+    "feishuForm": {
+      "titleLabel": "标题",
+      "authorLabel": "圈友",
+      "regionLabel": "地区",
+      "industryLabel": "行业",
+      "publishDateLabel": "文章发布时间",
+      "articleLinkLabel": "文章链接",
+      "feishuLinkLabel": "飞书链接",
+      "submitText": "提交",
+      "unknownRegionText": "暂时不知"
+    }
+  }
+}

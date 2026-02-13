@@ -1,0 +1,157 @@
+const fs = require('fs');
+const path = require('path');
+const { launchContext, closeContext } = require('./browserContext');
+
+const config = JSON.parse(fs.readFileSync(path.resolve(__dirname, '..', 'config.json'), 'utf-8'));
+const FORM_URL = 'https://ucnbnmgoiyel.feishu.cn/share/base/form/shrcnetYBXcFx13cg9Cx0KmaCsf';
+
+const targets = [
+  {
+    title: '【大学老师初入油管】21天2400万观看，初级YPP审核失败，我用AI手搓了一个油管视频流水线',
+    author: '天才老师',
+    industry: '出海',
+    articleLink: 'https://scys.com/articleDetail/xq_topic/14588582112884152'
+  },
+  {
+    title: '深耕亚马逊两年，分享做电商开品的底层思路，国内也适用，新人可参考',
+    author: '女巫的蛋挞',
+    industry: '出海',
+    articleLink: 'https://scys.com/articleDetail/xq_topic/55188521852482814'
+  },
+  {
+    title: '心力跃迁手册 | 开启你新一年的10倍增长',
+    author: '石神马',
+    industry: '生财认知',
+    articleLink: 'https://scys.com/articleDetail/xq_topic/45811541144228118'
+  },
+  {
+    title: '抖音自然流 CPS 与 B 站好物投流实战全解析：从 267 万 GMV 到长效增长的底层逻辑',
+    author: '星空海绵',
+    industry: '生财认知',
+    articleLink: 'https://scys.com/articleDetail/xq_topic/45811542418552218'
+  }
+];
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function norm(s) { return String(s || '').replace(/\s+/g, ' ').trim(); }
+function extractDatetime(text) {
+  const m = norm(text).match(/20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\s+\d{1,2}:\d{2}/);
+  if (!m) return '';
+  const [y, mo, d, h, mi] = m[0].match(/(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2}):(\d{2})/).slice(1);
+  return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')} ${String(h).padStart(2, '0')}:${mi}`;
+}
+function extractRegion(text) {
+  const m = norm(text).match(/((?:[\u4e00-\u9fa5]+(?:省|市|自治区|特别行政区))(?:\/[\u4e00-\u9fa5]+(?:市|区|县|旗|州|盟|自治州|自治县)){1,3})/);
+  return m ? m[1] : '暂时不知';
+}
+function extractFeishu(text) {
+  const m = text.match(/https?:\/\/[^\s"']*(?:feishu|lark)[^\s"']*/i);
+  return m ? m[0] : '';
+}
+
+async function getArticleData(context, target) {
+  const { articleLink, industry } = target;
+  const page = await context.newPage();
+  await page.goto(articleLink, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await sleep(2500);
+
+  const bodyText = await page.locator('body').innerText().catch(() => '');
+  const title = target.title;
+  const author = target.author;
+
+  const publishDate = extractDatetime(bodyText);
+  const feishuLink = extractFeishu(bodyText);
+
+  let region = '暂时不知';
+  if (author) {
+    const nameNode = page.getByText(author, { exact: false }).first();
+    if (await nameNode.count()) {
+      const clickTarget = nameNode.locator('xpath=ancestor::*[contains(@class,"name-identity") or contains(@class,"post-item-top-right")][1]');
+      const target = (await clickTarget.count()) ? clickTarget.first() : nameNode;
+      const prev = page.url();
+      const popupPromise = context.waitForEvent('page', { timeout: 5000 }).catch(() => null);
+      await target.click({ force: true }).catch(() => {});
+      const popup = await popupPromise;
+      if (popup) {
+        await popup.waitForLoadState('domcontentloaded').catch(() => {});
+        await sleep(1500);
+        const t = await popup.locator('body').innerText().catch(() => '');
+        region = extractRegion(t);
+        await popup.close().catch(() => {});
+      } else {
+        await page.waitForURL(u => u.toString() !== prev, { timeout: 5000 }).catch(() => {});
+        const t = await page.locator('body').innerText().catch(() => '');
+        region = extractRegion(t);
+        if (page.url() !== articleLink) {
+          await page.goBack({ waitUntil: 'domcontentloaded' }).catch(() => {});
+          await sleep(800);
+        }
+      }
+    }
+  }
+
+  await page.close().catch(() => {});
+  return { title, author, region, industry, publishDate, articleLink, feishuLink };
+}
+
+async function fieldContainerByLabel(page, label) {
+  const labelNode = page.getByText(label, { exact: false }).first();
+  if ((await labelNode.count()) === 0) throw new Error(`Label not found: ${label}`);
+  const container = labelNode.locator('xpath=ancestor::div[starts-with(@id,"field-item-")][1]').first();
+  if ((await container.count()) === 0) throw new Error(`Field container not found: ${label}`);
+  return container;
+}
+
+async function fillTextField(page, label, value) {
+  const container = await fieldContainerByLabel(page, label);
+  const editable = container.locator('[contenteditable="true"]').first();
+  if ((await editable.count()) === 0) throw new Error(`Editable not found: ${label}`);
+  const v = String(value || '');
+  await editable.click({ force: true });
+  await editable.press('Meta+A').catch(async () => { await editable.press('Control+A').catch(() => {}); });
+  await editable.press('Backspace').catch(() => {});
+  await editable.type(v, { delay: 12 });
+  await sleep(120);
+  const check = norm(await container.innerText().catch(() => ''));
+  if (v && !check.includes(v)) throw new Error(`Fill verify failed: ${label}`);
+}
+
+async function submitOne(page, row) {
+  await fillTextField(page, '标题', row.title);
+  await fillTextField(page, '圈友', row.author);
+  await fillTextField(page, '地区', row.region);
+  await fillTextField(page, '行业', row.industry);
+  await fillTextField(page, '文章发布时间', row.publishDate);
+  await fillTextField(page, '文章链接', row.articleLink);
+  await fillTextField(page, '飞书链接', row.feishuLink || '');
+
+  const submit = page.getByText('Submit', { exact: false }).first();
+  const enabled = await submit.isEnabled().catch(() => false);
+  if (!enabled) throw new Error('Submit disabled');
+  await submit.click({ timeout: 10000 });
+}
+
+(async () => {
+  const context = await launchContext(config, __dirname);
+  const collected = [];
+  for (const t of targets) {
+    const row = await getArticleData(context, t);
+    collected.push(row);
+  }
+
+  const out = path.resolve(__dirname, '..', './output/deterministic_4_rows.json');
+  fs.writeFileSync(out, JSON.stringify(collected, null, 2), 'utf-8');
+
+  for (let i = 0; i < collected.length; i++) {
+    const form = await context.newPage();
+    await form.goto(FORM_URL, { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await sleep(2500);
+    await submitOne(form, collected[i]);
+    console.log(`Submitted ${i + 1}: ${collected[i].title}`);
+    await sleep(1800);
+    await form.close().catch(() => {});
+  }
+
+  console.log('Deterministic 4 submit finished.');
+  await closeContext(context);
+})();

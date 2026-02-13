@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# automation runtime/local state
+automation/node_modules/
+automation/output/
+automation/chrome_profile_clone/
+automation/storage_state.json
+automation/config.json
+
+# logs
+*.log
