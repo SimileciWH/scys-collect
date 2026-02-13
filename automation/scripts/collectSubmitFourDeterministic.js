@@ -108,10 +108,11 @@ async function tryOpenAuthorDetail(context, articlePage, authorName) {
   return null;
 }
 
-async function captureUrlByClick(context, page, locator) {
+async function captureUrlByClick(context, page, locator, options = {}) {
+  const forceRealClick = options.forceRealClick === true;
   const href = await locator.getAttribute('href').catch(() => '');
   const hrefUrl = resolveLikeUrl(href, page.url());
-  if (isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
+  if (!forceRealClick && isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
 
   const before = page.url();
   const popupPromise = context.waitForEvent('page', { timeout: 4500 }).catch(() => null);
@@ -123,7 +124,10 @@ async function captureUrlByClick(context, page, locator) {
     const popped = popup.url();
     await popup.close().catch(() => {});
     const u = resolveLikeUrl(popped, before);
-    return normalizeUrlText(u || '');
+    const normalized = normalizeUrlText(u || '');
+    if (isFeishuUrl(normalized)) return normalized;
+    if (isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
+    return normalized;
   }
 
   await page.waitForURL((u) => u.toString() !== before, { timeout: 3000 }).catch(() => {});
@@ -132,8 +136,12 @@ async function captureUrlByClick(context, page, locator) {
     const u = resolveLikeUrl(jumped, before);
     await page.goBack({ waitUntil: 'domcontentloaded', timeout: 15000 }).catch(() => {});
     await sleep(500);
-    return normalizeUrlText(u || '');
+    const normalized = normalizeUrlText(u || '');
+    if (isFeishuUrl(normalized)) return normalized;
+    if (isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
+    return normalized;
   }
+  if (isFeishuUrl(hrefUrl)) return normalizeUrlText(hrefUrl);
   return '';
 }
 
@@ -143,7 +151,7 @@ async function extractFeishuByDomOrClick(context, articlePage, bodyText) {
 
   const nearLabel = articlePage.locator('xpath=(//*[contains(normalize-space(.),"飞书链接")]//a)[1] | (//*[contains(normalize-space(.),"飞书链接")]/following::a[1])').first();
   if (await nearLabel.count()) {
-    const u = await captureUrlByClick(context, articlePage, nearLabel);
+    const u = await captureUrlByClick(context, articlePage, nearLabel, { forceRealClick: true });
     if (isFeishuUrl(u)) return normalizeUrlText(u);
   }
 
@@ -209,16 +217,47 @@ async function fieldContainerByLabel(page, label) {
 
 async function fillTextField(page, label, value) {
   const container = await fieldContainerByLabel(page, label);
+  const v = String(value || '');
+  const input = container.locator('input, textarea').first();
+  if (await input.count()) {
+    await input.click({ force: true });
+    await input.fill(v);
+    await input.dispatchEvent('input').catch(() => {});
+    await input.dispatchEvent('change').catch(() => {});
+    await input.press('Tab').catch(() => {});
+    const inputValue = await input.inputValue().catch(() => '');
+    if (v && !norm(inputValue).includes(norm(v))) throw new Error(`Fill verify failed: ${label}`);
+    return;
+  }
+
   const editable = container.locator('[contenteditable="true"]').first();
   if ((await editable.count()) === 0) throw new Error(`Editable not found: ${label}`);
-  const v = String(value || '');
   await editable.click({ force: true });
   await editable.press('Meta+A').catch(async () => { await editable.press('Control+A').catch(() => {}); });
   await editable.press('Backspace').catch(() => {});
   await editable.type(v, { delay: 12 });
+  await editable.press('Tab').catch(() => {});
   await sleep(120);
   const check = norm(await container.innerText().catch(() => ''));
   if (v && !check.includes(v)) throw new Error(`Fill verify failed: ${label}`);
+}
+
+async function fillUrlField(page, label, value) {
+  const container = await fieldContainerByLabel(page, label);
+  const v = String(value || '');
+  const urlInput = container.locator('input[type="url"], input[type="text"], textarea').first();
+  if ((await urlInput.count()) > 0) {
+    await urlInput.click({ force: true });
+    await urlInput.fill(v);
+    await urlInput.dispatchEvent('input').catch(() => {});
+    await urlInput.dispatchEvent('change').catch(() => {});
+    await urlInput.press('Tab').catch(() => {});
+    await sleep(120);
+    const inputValue = await urlInput.inputValue().catch(() => '');
+    if (v && !norm(inputValue).includes(norm(v))) throw new Error(`URL fill verify failed: ${label}`);
+    return;
+  }
+  await fillTextField(page, label, v);
 }
 
 async function submitOne(page, row) {
@@ -227,8 +266,8 @@ async function submitOne(page, row) {
   await fillTextField(page, '地区', row.region);
   await fillTextField(page, '行业', row.industry);
   await fillTextField(page, '文章发布时间', row.publishDate);
-  await fillTextField(page, '文章链接', row.articleLink);
-  await fillTextField(page, '飞书链接', row.feishuLink || '');
+  await fillUrlField(page, '文章链接', row.articleLink);
+  await fillUrlField(page, '飞书链接', row.feishuLink || '');
 
   const submit = page.getByRole('button', { name: /提交|submit/i }).first();
   const enabled = await submit.isEnabled().catch(() => false);
