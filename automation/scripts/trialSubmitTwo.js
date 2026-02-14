@@ -119,7 +119,9 @@ function toFormRow(row) {
     await setTextByLabel(page, '标题', row.title);
     await setTextByLabel(page, '圈友', row.authorOption);
     await setTextByLabel(page, '地区', row.regionOption);
-    await setTextByLabel(page, '行业', row.industryOption);
+    await setTextByLabel(page, '类型', row.industryOption).catch(async () => {
+      await setTextByLabel(page, '行业', row.industryOption);
+    });
     await setTextByLabel(page, '文章发布时间', row.publishDate);
     await setTextByLabel(page, '文章链接', row.articleLink);
     await setTextByLabel(page, '飞书链接', row.feishuLink);

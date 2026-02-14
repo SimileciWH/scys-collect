@@ -261,10 +261,23 @@ async function fillUrlField(page, label, value) {
 }
 
 async function submitOne(page, row) {
+  const fillByLabels = async (labels, value) => {
+    let lastErr;
+    for (const label of labels) {
+      try {
+        await fillTextField(page, label, value);
+        return;
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error(`No matched label: ${labels.join('/')}`);
+  };
+
   await fillTextField(page, '标题', row.title);
   await fillTextField(page, '圈友', row.author);
   await fillTextField(page, '地区', row.region);
-  await fillTextField(page, '行业', row.industry);
+  await fillByLabels(['类型', '行业'], row.industry);
   await fillTextField(page, '文章发布时间', row.publishDate);
   await fillUrlField(page, '文章链接', row.articleLink);
   await fillUrlField(page, '飞书链接', row.feishuLink || '');

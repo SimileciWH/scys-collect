@@ -81,7 +81,9 @@ async function setSelectField(page, label, value) {
   await setTextField(page, '标题', row.title);
   await setTextField(page, '圈友', row.author);
   await setTextField(page, '地区', row.region);
-  await setTextField(page, '行业', row.industry);
+  await setTextField(page, '类型', row.industry).catch(async () => {
+    await setTextField(page, '行业', row.industry);
+  });
   await setTextField(page, '文章发布时间', row.publishDate);
   await setTextField(page, '文章链接', row.articleLink);
   await setTextField(page, '飞书链接', row.feishuLink);
