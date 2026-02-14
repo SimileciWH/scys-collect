@@ -15,6 +15,32 @@
   "outputCsvPath": "./output/records.csv",
   "outputJsonlPath": "./output/records.jsonl",
   "dedupeKey": "articleLink",
+  "pacing": {
+    "enabled": true,
+    "mode": "human",
+    "maxPerHour": 30,
+    "jitterMs": 8000,
+    "label": "scys",
+    "dailyMax": 200,
+    "allowedWindows": [{ "start": "07:00", "end": "23:59" }],
+    "statePath": "./output/pacing_state.json",
+    "session": {
+      "workMinMs": 2100000,
+      "workMaxMs": 4500000,
+      "restMinMs": 720000,
+      "restMaxMs": 1680000
+    },
+    "megaPause": {
+      "everyMin": 6,
+      "everyMax": 12,
+      "minMs": 300000,
+      "maxMs": 900000
+    },
+    "errorBackoff": {
+      "minMs": 1800000,
+      "maxMs": 7200000
+    }
+  },
   "expand": {
     "enabled": true,
     "maxClicks": 50,

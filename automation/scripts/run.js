@@ -13,6 +13,7 @@ const formSelectors = selectors.feishuForm || {};
 
 const outputCsvPath = path.resolve(__dirname, '..', config.outputCsvPath || './output/records.csv');
 const outputJsonlPath = path.resolve(__dirname, '..', config.outputJsonlPath || './output/records.jsonl');
+const { createPacerFromConfig } = require('../lib/runtime/pacer');
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -544,6 +545,7 @@ async function closeArticlePage(listPage, articlePage, closeMode) {
 
 (async () => {
   const context = await launchContext(config, __dirname);
+  const pacer = createPacerFromConfig(config, { label: 'scys', maxPerHour: 30, jitterMs: 8000 });
   const maxSubmissions = Number.isFinite(Number(config.maxSubmissions)) ? Number(config.maxSubmissions) : 0;
   const ignoreDedupe = config.ignoreDedupe === true;
   let submittedCount = 0;
@@ -599,6 +601,8 @@ async function closeArticlePage(listPage, articlePage, closeMode) {
     const cardCount = await cardLoc.count();
     for (let c = 0; c < cardCount; c++) {
       const card = cardLoc.nth(c);
+      // Even pacing to avoid bursty bot-like behavior.
+      await pacer.beforeItem(`section=${i + 1}/${sectionCount} card=${c + 1}/${cardCount}`);
 
       let title = '';
       let author = '';
@@ -701,6 +705,9 @@ async function closeArticlePage(listPage, articlePage, closeMode) {
             shouldStop = true;
           }
         } catch (err) {
+          if (pacer && typeof pacer.afterError === 'function') {
+            await pacer.afterError(`submit card=${c + 1}/${cardCount}`).catch(() => {});
+          }
           appendErrorLog(row, err);
           const shotPath = path.resolve(__dirname, '..', `./output/submit_error_${Date.now()}.png`);
           await formPage.screenshot({ path: shotPath, fullPage: true }).catch(() => {});
