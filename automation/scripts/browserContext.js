@@ -12,9 +12,29 @@ function resolveHome(p) {
   return p;
 }
 
+function resolveProfileDirectory(chromeUserDataDir, profileDirectory) {
+  const directPath = path.join(chromeUserDataDir, profileDirectory);
+  if (fs.existsSync(directPath)) return profileDirectory;
+
+  const localStatePath = path.join(chromeUserDataDir, 'Local State');
+  if (!fs.existsSync(localStatePath)) return profileDirectory;
+  try {
+    const localState = JSON.parse(fs.readFileSync(localStatePath, 'utf-8'));
+    const info = localState && localState.profile && localState.profile.info_cache ? localState.profile.info_cache : {};
+    for (const [dirName, meta] of Object.entries(info)) {
+      const displayName = meta && meta.name ? String(meta.name) : '';
+      if (displayName === profileDirectory) {
+        return dirName;
+      }
+    }
+  } catch (_) {}
+  return profileDirectory;
+}
+
 function syncChromeProfileSnapshot(config, scriptDir) {
   const chromeUserDataDir = resolveHome(config.chromeUserDataDir || '~/Library/Application Support/Google/Chrome');
-  const profileDirectory = config.chromeProfileDirectory || 'Default';
+  const profileDirectoryInput = config.chromeProfileDirectory || 'Default';
+  const profileDirectory = resolveProfileDirectory(chromeUserDataDir, profileDirectoryInput);
   const cloneDir = path.resolve(scriptDir, '..', config.chromeProfileCloneDir || './chrome_profile_clone');
 
   fs.mkdirSync(cloneDir, { recursive: true });
