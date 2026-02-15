@@ -49,6 +49,25 @@ async function dumpDebugArtifacts(page, prefix) {
   } catch (_) {}
 }
 
+async function ensureFormEntryPage(page, formLabels) {
+  // If we're on the success/landing page, click "Fill Again/再次填写" to get back to the form.
+  const againBtn = page.getByRole('button', { name: /fill again|再次填写|继续填写|重新填写|开始填写|填写表单/i }).first();
+  if ((await againBtn.count().catch(() => 0)) > 0) {
+    await againBtn.click({ timeout: 10000 }).catch(() => {});
+    await sleep(1200);
+  }
+
+  // Wait until the form fields are visible.
+  const started = Date.now();
+  const timeoutMs = Number(process.env.FEISHU_FORM_READY_TIMEOUT_MS || '20000');
+  while (Date.now() - started < timeoutMs) {
+    const c = await page.getByText(formLabels.titleLabel, { exact: false }).count().catch(() => 0);
+    if (c > 0) return true;
+    await sleep(500);
+  }
+  return false;
+}
+
 async function fillField(page, label, value, attempt = 0) {
   const v = String(value || '');
   const container = await fieldContainerByLabel(page, label);
@@ -127,6 +146,9 @@ async function fillField(page, label, value, attempt = 0) {
 }
 
 async function submitRowToFeishuForm(page, formLabels, row) {
+  const ok = await ensureFormEntryPage(page, formLabels);
+  if (!ok) throw new Error('Feishu form not ready for entry');
+
   await fillField(page, formLabels.titleLabel, row.title);
   await fillField(page, formLabels.authorLabel, row.author);
   if (String(row.region || '').trim()) {
@@ -146,8 +168,8 @@ async function submitRowToFeishuForm(page, formLabels, row) {
   if (!enabled) throw new Error('Submit disabled');
   await submit.click({ timeout: 10000 });
 
-  const ok = await waitForSubmitSuccess(page);
-  if (!ok) {
+  const ok2 = await waitForSubmitSuccess(page);
+  if (!ok2) {
     await dumpDebugArtifacts(page, 'feishu_submit_failed');
     throw new Error('Submit click done but no success confirmation detected');
   }
@@ -155,5 +177,6 @@ async function submitRowToFeishuForm(page, formLabels, row) {
 
 module.exports = {
   fillField,
-  submitRowToFeishuForm
+  submitRowToFeishuForm,
+  ensureFormEntryPage
 };

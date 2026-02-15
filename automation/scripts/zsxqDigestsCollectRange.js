@@ -27,7 +27,7 @@ const path = require('path');
 const { launchContext, closeContext } = require('./browserContext');
 const { sleep } = require('../lib/runtime/wait');
 const { createPacerFromConfig } = require('../lib/runtime/pacer');
-const { submitRowToFeishuForm } = require('../lib/sinks/feishuForm');
+const { submitRowToFeishuForm, ensureFormEntryPage } = require('../lib/sinks/feishuForm');
 const { fmtDateFromCreateTime } = require('../lib/extractors/zsxq');
 const {
   parseDigestListItemText,
@@ -132,7 +132,7 @@ async function openFeishuFormPage(context, config, storageStatePath) {
   return formPage;
 }
 
-async function collectOne(context, config, storageStatePath, digestsUrl, groupId, pageNo, indexInPage) {
+async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo, indexInPage) {
   const listPage = context.pages().find((p) => p.url().includes('/digests/')) || context.pages()[0];
   const items = await waitForDigestItems(listPage);
   const item = items.nth(indexInPage);
@@ -150,15 +150,26 @@ async function collectOne(context, config, storageStatePath, digestsUrl, groupId
 
     const u = detailPage.url();
     if (u.includes('/join_group') || u.includes('topicStatus=error')) {
-      throw new Error(`detail redirected to error page: ${u}`);
+      // We can often still fetch title/author/time via pub-api using topicId.
+      // Treat this as "limited extraction": skip UI-based fields (type tags, feishu link).
     }
 
-    await humanScroll(detailPage, 2);
+    // If we are on the real topic detail (not error redirect), do a little scroll to
+    // trigger lazy content and reduce bot-like behavior.
+    if (!u.includes('/join_group') && !u.includes('topicStatus=error')) {
+      await humanScroll(detailPage, 2);
+    }
 
-    const feishuLink = await extractFeishuLinkFromDetailPage(context, detailPage);
-    if (!feishuLink) throw new Error('No Feishu link found in detail page');
+    // Feishu link is optional now: if missing, still submit with empty feishuLink.
+    const feishuLink =
+      !u.includes('/join_group') && !u.includes('topicStatus=error')
+        ? await extractFeishuLinkFromDetailPage(context, detailPage)
+        : '';
 
-    const typeValue = await extractTypeTagsFromDetailPage(detailPage);
+    const typeValue =
+      !u.includes('/join_group') && !u.includes('topicStatus=error')
+        ? await extractTypeTagsFromDetailPage(detailPage)
+        : '';
 
     // Prefer pub-api payload for title/author/publishDate if list parsing is incomplete.
     let topicJson = null;
@@ -192,7 +203,7 @@ async function collectOne(context, config, storageStatePath, digestsUrl, groupId
       typeValue: typeValue || '', // optional
       publishDate,
       articleLink,
-      feishuLink
+      feishuLink: feishuLink || ''
     };
 
     const missing = [];
@@ -200,15 +211,11 @@ async function collectOne(context, config, storageStatePath, digestsUrl, groupId
     if (!row.author.trim()) missing.push('author');
     if (!String(row.publishDate || '').trim()) missing.push('publishDate');
     if (!String(row.articleLink || '').trim()) missing.push('articleLink');
-    if (!String(row.feishuLink || '').trim()) missing.push('feishuLink');
     if (missing.length) throw new Error(`missing required fields: ${missing.join(',')}`);
 
-    const formPage = await openFeishuFormPage(context, config, storageStatePath);
-    try {
-      await submitRowToFeishuForm(formPage, config.selectors.feishuForm, row);
-    } finally {
-      await formPage.close().catch(() => {});
-    }
+    // Ensure the persistent Feishu form tab is on the entry page (click "Fill Again" if needed).
+    await ensureFormEntryPage(formPage, config.selectors.feishuForm);
+    await submitRowToFeishuForm(formPage, config.selectors.feishuForm, row);
 
     return { topicId, dateOnly: parsed.dateOnly || '', row, pageNo, indexInPage };
   } finally {
@@ -225,6 +232,14 @@ async function collectOne(context, config, storageStatePath, digestsUrl, groupId
       }
     }
   }
+}
+
+function isSkippableError(err) {
+  if (!err) return false;
+  if (err._skip) return true;
+  const msg = String(err && err.message ? err.message : err);
+  if (msg.startsWith('SKIP:')) return true;
+  return false;
 }
 
 async function main() {
@@ -250,10 +265,28 @@ async function main() {
   const pacer = createPacerFromConfig(config, {
     label: 'zsxq-digests',
     mode: 'human',
-    maxPerHour: 30,
-    dailyMax: 200,
+    // Tuned "recommended" speed: faster than before, still pattern-broken.
+    maxPerHour: 36,
+    dailyMax: 600,
     allowedWindows: [{ start: '07:00', end: '23:59' }],
-    jitterMs: 8000
+    jitterMs: 6000,
+    session: {
+      workMinMs: 25 * 60 * 1000,
+      workMaxMs: 55 * 60 * 1000,
+      restMinMs: 5 * 60 * 1000,
+      restMaxMs: 18 * 60 * 1000
+    },
+    dwellWeights: [
+      { w: 0.8, min: 30 * 1000, max: 120 * 1000 },
+      { w: 0.17, min: 120 * 1000, max: 5 * 60 * 1000 },
+      { w: 0.03, min: 8 * 60 * 1000, max: 12 * 60 * 1000 }
+    ],
+    megaPause: {
+      everyMin: 7,
+      everyMax: 15,
+      minMs: 3 * 60 * 1000,
+      maxMs: 10 * 60 * 1000
+    }
   });
   if (process.env.FAST === '1') {
     pacer.enabled = false;
@@ -287,6 +320,10 @@ async function main() {
     await listPage.goto(digestsUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
     await waitForDigestItems(listPage);
     await ensureLoggedIn(listPage, context, storageStatePath, 'zsxq');
+
+    // Keep one Feishu tab open for all submissions to avoid per-item reloading/login churn.
+    const formPage = await openFeishuFormPage(context, config, storageStatePath);
+    await ensureFormEntryPage(formPage, config.selectors.feishuForm);
 
     // Seek pages if resuming.
     if (progress.pageNo > 1) {
@@ -334,7 +371,7 @@ async function main() {
         await pacer.beforeItem(`page=${progress.pageNo} idx=${i + 1}/${itemCount} date=${dateOnly}`);
 
         try {
-          const res = await collectOne(context, config, storageStatePath, digestsUrl, groupId, progress.pageNo, i);
+          const res = await collectOne(context, config, formPage, digestsUrl, groupId, progress.pageNo, i);
           progress.done += 1;
           progress.lastTopicId = res.topicId || '';
           progress.lastDate = res.dateOnly || dateOnly;
@@ -351,20 +388,33 @@ async function main() {
             return;
           }
         } catch (err) {
+          const msg = String(err && err.message ? err.message : err);
           appendJsonl(errPath, {
             at: new Date().toISOString(),
             pageNo: progress.pageNo,
             indexInPage: i,
-            error: String(err && err.message ? err.message : err)
+            error: msg
           });
+
+          if (isSkippableError(err)) {
+            // Non-recoverable for this item; skip forward without long backoff.
+            progress.status = 'running';
+            progress.reason = '';
+            progress.indexInPage = i + 1;
+            writeJsonAtomic(progressPath, progress);
+            // Small jitter so we don't look like a tight loop on errors.
+            await sleep(1500 + Math.floor(Math.random() * 2500));
+            continue;
+          }
+
           progress.status = 'error';
-          progress.reason = String(err && err.message ? err.message : err);
+          progress.reason = msg;
           writeJsonAtomic(progressPath, progress);
 
           if (pacer && typeof pacer.afterError === 'function') {
             await pacer.afterError(`page=${progress.pageNo} idx=${i}`).catch(() => {});
           }
-          // Retry from same i.
+          // Retry from same i for potentially recoverable errors.
           continue;
         }
       }
