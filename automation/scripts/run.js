@@ -674,6 +674,7 @@ async function closeArticlePage(listPage, articlePage, closeMode) {
       await closeArticlePage(page, articlePage, opened.closeMode);
 
       const row = {
+        at: new Date().toISOString(),
         title,
         author,
         region,

@@ -123,7 +123,7 @@ async function main() {
         await sleep(1200);
         await formPage.close().catch(() => {});
 
-        appendJsonl(OUTPUT_JSONL, { lineNo: item.lineNo, ...enriched });
+        appendJsonl(OUTPUT_JSONL, { at: new Date().toISOString(), lineNo: item.lineNo, ...enriched });
         done += 1;
         console.log(`Submitted test row ${done}/${maxRows}: line=${item.lineNo} title=${enriched.title}`);
       } catch (err) {
