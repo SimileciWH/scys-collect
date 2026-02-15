@@ -19,6 +19,17 @@ help:
 	@echo "  make scys-run        Run SCYS collector (existing script)"
 	@echo "  make csv-enrich      Enrich CSV and submit (existing script)"
 	@echo ""
+	@echo "Examples:"
+	@echo "  make zsxq-run"
+	@echo "  make zsxq-run START_DATE=2026-02-15 END_DATE=2025-01-01"
+	@echo "  make zsxq-run MAX_ITEMS=20"
+	@echo "  make zsxq-fast MAX_ITEMS=2"
+	@echo "  make zsxq-dry"
+	@echo "  make zsxq-progress"
+	@echo "  make zsxq-tail"
+	@echo "  make scys-run"
+	@echo "  make csv-enrich"
+	@echo ""
 	@echo "Override variables:"
 	@echo "  GROUP_ID=... DIGESTS_URL=... START_DATE=YYYY-MM-DD END_DATE=YYYY-MM-DD MAX_ITEMS=N"
 
@@ -42,4 +53,3 @@ scys-run:
 
 csv-enrich:
 	cd automation && node scripts/enrichCsvAndSubmit.js
-
