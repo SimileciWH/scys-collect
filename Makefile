@@ -1,4 +1,4 @@
-.PHONY: help zsxq-run zsxq-fast zsxq-dry zsxq-tail zsxq-progress scys-run csv-enrich
+.PHONY: help zsxq-run zsxq-fast zsxq-dry zsxq-tail zsxq-progress scys-run csv-enrich stats
 
 GROUP_ID ?= 1824528822
 DIGESTS_URL ?= https://wx.zsxq.com/digests/$(GROUP_ID)
@@ -18,6 +18,7 @@ help:
 	@echo "  make zsxq-tail       Tail last 20 submitted records (jsonl)"
 	@echo "  make scys-run        Run SCYS collector (existing script)"
 	@echo "  make csv-enrich      Enrich CSV and submit (existing script)"
+	@echo "  make stats           Show throughput stats (auto-detect mode)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make zsxq-run"
@@ -29,9 +30,13 @@ help:
 	@echo "  make zsxq-tail"
 	@echo "  make scys-run"
 	@echo "  make csv-enrich"
+	@echo "  make stats"
+	@echo "  make stats HOURS=6 DAYS=3"
+	@echo "  make stats MODE=zsxq HOURS=24 DAYS=14"
 	@echo ""
 	@echo "Override variables:"
 	@echo "  GROUP_ID=... DIGESTS_URL=... START_DATE=YYYY-MM-DD END_DATE=YYYY-MM-DD MAX_ITEMS=N"
+	@echo "  MODE=auto|zsxq|scys|csv HOURS=N DAYS=N"
 
 zsxq-run:
 	cd automation && GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=$(MAX_ITEMS) node scripts/zsxqDigestsCollectRange.js
@@ -53,3 +58,10 @@ scys-run:
 
 csv-enrich:
 	cd automation && node scripts/enrichCsvAndSubmit.js
+
+MODE ?= auto
+HOURS ?= 24
+DAYS ?= 14
+
+stats:
+	./automation/tools/collect_stats.py --mode $(MODE) --hours $(HOURS) --days $(DAYS)
