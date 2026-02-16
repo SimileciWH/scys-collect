@@ -70,21 +70,21 @@ function parseDigestListItemText(rawText) {
 async function waitForDigestItems(page) {
   const items = page.locator('.digest-topic-item');
   await items.first().waitFor({ state: 'attached', timeout: 60000 }).catch(() => {});
-  await page.waitForLoadState('networkidle').catch(() => {});
-  await sleep(300 + Math.floor(Math.random() * 400));
+  // Avoid long fixed waiting; a short jitter after first item appears is enough.
+  await sleep(120 + Math.floor(Math.random() * 180));
   return items;
 }
 
 async function humanScroll(page, rounds = 2) {
   for (let i = 0; i < rounds; i++) {
-    const steps = 3 + Math.floor(Math.random() * 4);
+    const steps = 2 + Math.floor(Math.random() * 3);
     for (let s = 0; s < steps; s++) {
-      await page.mouse.wheel(0, 300 + Math.floor(Math.random() * 700)).catch(() => {});
-      await sleep(350 + Math.floor(Math.random() * 650));
+      await page.mouse.wheel(0, 240 + Math.floor(Math.random() * 520)).catch(() => {});
+      await sleep(180 + Math.floor(Math.random() * 320));
     }
     if (Math.random() < 0.25) {
-      await page.mouse.wheel(0, -200 - Math.floor(Math.random() * 400)).catch(() => {});
-      await sleep(300 + Math.floor(Math.random() * 600));
+      await page.mouse.wheel(0, -160 - Math.floor(Math.random() * 280)).catch(() => {});
+      await sleep(180 + Math.floor(Math.random() * 240));
     }
   }
 }
@@ -108,13 +108,13 @@ async function clickDigestAndGetDetailPage(context, listPage, index = 0) {
 
   if (popup) {
     await popup.waitForLoadState('domcontentloaded').catch(() => {});
-    await sleep(500 + Math.floor(Math.random() * 600));
+    await sleep(180 + Math.floor(Math.random() * 280));
   } else {
     // If navigated within same tab, wait a bit.
     if (listPage.url() !== beforeUrl) {
       await listPage.waitForLoadState('domcontentloaded').catch(() => {});
     }
-    await sleep(400 + Math.floor(Math.random() * 600));
+    await sleep(150 + Math.floor(Math.random() * 260));
   }
 
   let topicId = extractTopicIdFromUrl(detailPage.url());
@@ -157,7 +157,7 @@ async function extractFeishuLinkFromDetailPage(context, page) {
   if (!popup) return '';
 
   await popup.waitForLoadState('domcontentloaded').catch(() => {});
-  await sleep(1000 + Math.floor(Math.random() * 1200));
+  await sleep(350 + Math.floor(Math.random() * 520));
   const u = popup.url();
   await popup.close().catch(() => {});
   if (/(feishu|lark)\./i.test(u)) return u;

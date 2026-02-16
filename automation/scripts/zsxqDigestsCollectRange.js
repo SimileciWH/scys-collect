@@ -87,7 +87,7 @@ async function ensureLoggedIn(page, context, storageStatePath, labelForLog) {
       console.log(`[${labelForLog}] login ok; saved storage state: ${storageStatePath}`);
       return;
     }
-    await sleep(5000);
+    await sleep(3000);
     if (Math.random() < 0.12) console.log(`[${labelForLog}] still waiting for login...`);
   }
 
@@ -99,7 +99,7 @@ async function gotoNextPage(listPage) {
   const cls = (await nextBtn.getAttribute('class').catch(() => '')) || '';
   if (/disabled/i.test(cls)) return false;
   await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-  await sleep(250 + Math.floor(Math.random() * 650));
+  await sleep(120 + Math.floor(Math.random() * 320));
   await nextBtn.click({ timeout: 15000, force: true }).catch(() => {});
   await waitForDigestItems(listPage);
   return true;
@@ -108,7 +108,7 @@ async function gotoNextPage(listPage) {
 async function openFeishuFormPage(context, config, storageStatePath) {
   const formPage = await context.newPage();
   await formPage.goto(config.feishuFormUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-  await sleep(1200);
+  await sleep(400 + Math.floor(Math.random() * 600));
 
   const labels = config.selectors.feishuForm;
   const ready = (await formPage.getByText(labels.titleLabel, { exact: false }).count().catch(() => 0)) > 0;
@@ -146,7 +146,7 @@ async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo
   try {
     await detailPage.waitForLoadState('domcontentloaded').catch(() => {});
     await detailPage.waitForLoadState('networkidle').catch(() => {});
-    await sleep(600 + Math.floor(Math.random() * 800));
+    await sleep(180 + Math.floor(Math.random() * 420));
 
     const u = detailPage.url();
     if (u.includes('/join_group') || u.includes('topicStatus=error')) {
@@ -157,7 +157,7 @@ async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo
     // If we are on the real topic detail (not error redirect), do a little scroll to
     // trigger lazy content and reduce bot-like behavior.
     if (!u.includes('/join_group') && !u.includes('topicStatus=error')) {
-      await humanScroll(detailPage, 2);
+      await humanScroll(detailPage, 1);
     }
 
     // Feishu link is optional now: if missing, still submit with empty feishuLink.
@@ -271,21 +271,21 @@ async function main() {
     allowedWindows: [{ start: '07:00', end: '23:59' }],
     jitterMs: 6000,
     session: {
-      workMinMs: 25 * 60 * 1000,
-      workMaxMs: 55 * 60 * 1000,
-      restMinMs: 5 * 60 * 1000,
-      restMaxMs: 18 * 60 * 1000
+      workMinMs: 22 * 60 * 1000,
+      workMaxMs: 42 * 60 * 1000,
+      restMinMs: 3 * 60 * 1000,
+      restMaxMs: 8 * 60 * 1000
     },
     dwellWeights: [
-      { w: 0.8, min: 30 * 1000, max: 120 * 1000 },
-      { w: 0.17, min: 120 * 1000, max: 5 * 60 * 1000 },
-      { w: 0.03, min: 8 * 60 * 1000, max: 12 * 60 * 1000 }
+      { w: 0.82, min: 18 * 1000, max: 75 * 1000 },
+      { w: 0.15, min: 75 * 1000, max: 3 * 60 * 1000 },
+      { w: 0.03, min: 4 * 60 * 1000, max: 7 * 60 * 1000 }
     ],
     megaPause: {
-      everyMin: 7,
-      everyMax: 15,
-      minMs: 3 * 60 * 1000,
-      maxMs: 10 * 60 * 1000
+      everyMin: 10,
+      everyMax: 20,
+      minMs: 2 * 60 * 1000,
+      maxMs: 6 * 60 * 1000
     }
   });
   if (process.env.FAST === '1') {
@@ -332,7 +332,7 @@ async function main() {
         const ok = await gotoNextPage(listPage);
         if (!ok) break;
         await ensureLoggedIn(listPage, context, storageStatePath, 'zsxq');
-        await sleep(400 + Math.floor(Math.random() * 900));
+        await sleep(160 + Math.floor(Math.random() * 420));
       }
       console.log('[resume] seek done.');
     }
@@ -403,7 +403,7 @@ async function main() {
             progress.indexInPage = i + 1;
             writeJsonAtomic(progressPath, progress);
             // Small jitter so we don't look like a tight loop on errors.
-            await sleep(1500 + Math.floor(Math.random() * 2500));
+            await sleep(700 + Math.floor(Math.random() * 1400));
             continue;
           }
 
