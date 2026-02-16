@@ -1,4 +1,4 @@
-.PHONY: help zsxq-run zsxq-fast zsxq-dry zsxq-tail zsxq-progress scys-run csv-enrich stats
+.PHONY: help zsxq-run zsxq-fast zsxq-dry zsxq-tail zsxq-progress zsxq-errors-csv scys-run csv-enrich stats
 
 GROUP_ID ?= 1824528822
 DIGESTS_URL ?= https://wx.zsxq.com/digests/$(GROUP_ID)
@@ -16,6 +16,7 @@ help:
 	@echo "  make zsxq-dry        Run only a few items (MAX_ITEMS=5, FAST=1)"
 	@echo "  make zsxq-progress   Print current progress JSON"
 	@echo "  make zsxq-tail       Tail last 20 submitted records (jsonl)"
+	@echo "  make zsxq-errors-csv Export zsxq error rows for manual handling"
 	@echo "  make scys-run        Run SCYS collector (existing script)"
 	@echo "  make csv-enrich      Enrich CSV and submit (existing script)"
 	@echo "  make stats           Show throughput stats (auto-detect mode)"
@@ -28,6 +29,7 @@ help:
 	@echo "  make zsxq-dry"
 	@echo "  make zsxq-progress"
 	@echo "  make zsxq-tail"
+	@echo "  make zsxq-errors-csv"
 	@echo "  make scys-run"
 	@echo "  make csv-enrich"
 	@echo "  make stats"
@@ -36,22 +38,26 @@ help:
 	@echo ""
 	@echo "Override variables:"
 	@echo "  GROUP_ID=... DIGESTS_URL=... START_DATE=YYYY-MM-DD END_DATE=YYYY-MM-DD MAX_ITEMS=N"
+	@echo "  PACE_PROFILE=safe|balanced|fast"
 	@echo "  MODE=auto|zsxq|scys|csv HOURS=N DAYS=N"
 
 zsxq-run:
-	cd automation && GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=$(MAX_ITEMS) node scripts/zsxqDigestsCollectRange.js
+	cd automation && GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=$(MAX_ITEMS) PACE_PROFILE=$(PACE_PROFILE) node scripts/zsxqDigestsCollectRange.js
 
 zsxq-fast:
-	cd automation && FAST=1 GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=$(MAX_ITEMS) node scripts/zsxqDigestsCollectRange.js
+	cd automation && FAST=1 GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=$(MAX_ITEMS) PACE_PROFILE=$(PACE_PROFILE) node scripts/zsxqDigestsCollectRange.js
 
 zsxq-dry:
-	cd automation && FAST=1 GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=5 node scripts/zsxqDigestsCollectRange.js
+	cd automation && FAST=1 GROUP_ID=$(GROUP_ID) DIGESTS_URL=$(DIGESTS_URL) START_DATE=$(START_DATE) END_DATE=$(END_DATE) MAX_ITEMS=5 PACE_PROFILE=$(PACE_PROFILE) node scripts/zsxqDigestsCollectRange.js
 
 zsxq-progress:
 	@cat automation/output/zsxq_digests_progress.json 2>/dev/null || echo "No progress yet: automation/output/zsxq_digests_progress.json"
 
 zsxq-tail:
 	@tail -n 20 automation/output/zsxq_digests_done.jsonl 2>/dev/null || echo "No done log yet: automation/output/zsxq_digests_done.jsonl"
+
+zsxq-errors-csv:
+	./automation/tools/export_zsxq_errors_for_manual.py
 
 scys-run:
 	cd automation && node scripts/run.js
@@ -62,6 +68,7 @@ csv-enrich:
 MODE ?= auto
 HOURS ?= 24
 DAYS ?= 14
+PACE_PROFILE ?= safe
 
 stats:
 	./automation/tools/collect_stats.py --mode $(MODE) --hours $(HOURS) --days $(DAYS)

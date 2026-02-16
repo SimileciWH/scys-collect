@@ -138,9 +138,17 @@ async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo
   const item = items.nth(indexInPage);
   const raw = await item.innerText().catch(() => '');
   const parsed = parseDigestListItemText(raw);
+  const meta = {
+    title: parsed.title || '',
+    author: parsed.author || '',
+    dateOnly: parsed.dateOnly || '',
+    topicId: '',
+    articleLink: ''
+  };
 
   const clicked = await clickDigestAndGetDetailPage(context, listPage, indexInPage);
   const topicId = clicked.topicId || '';
+  meta.topicId = topicId;
   const detailPage = clicked.detailPage;
 
   try {
@@ -195,6 +203,7 @@ async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo
         : topicId
           ? `https://wx.zsxq.com/mweb/views/topicdetail/topicdetail.html?topic_id=${topicId}`
           : '';
+    meta.articleLink = articleLink;
 
     const row = {
       title: jsonTitle || parsed.title || '',
@@ -218,6 +227,12 @@ async function collectOne(context, config, formPage, digestsUrl, groupId, pageNo
     await submitRowToFeishuForm(formPage, config.selectors.feishuForm, row);
 
     return { topicId, dateOnly: parsed.dateOnly || '', row, pageNo, indexInPage };
+  } catch (err) {
+    // Attach meta for downstream error logs / manual recovery list.
+    if (err && typeof err === 'object') {
+      err._meta = { ...(err._meta || {}), ...meta };
+    }
+    throw err;
   } finally {
     if (detailPage !== listPage) {
       await detailPage.close().catch(() => {});
@@ -239,6 +254,9 @@ function isSkippableError(err) {
   if (err._skip) return true;
   const msg = String(err && err.message ? err.message : err);
   if (msg.startsWith('SKIP:')) return true;
+  // Data-quality missing fields are usually non-recoverable for the current row.
+  // Skip forward instead of retrying forever on the same item.
+  if (msg.includes('missing required fields:')) return true;
   return false;
 }
 
@@ -255,6 +273,7 @@ async function main() {
   if (!startDate || !endDate) throw new Error('START_DATE/END_DATE must be YYYY-MM-DD');
 
   const maxItems = Number(process.env.MAX_ITEMS || '0');
+  const paceProfile = String(process.env.PACE_PROFILE || 'safe').toLowerCase();
   const outDir = path.resolve(__dirname, '..', 'output');
   const progressPath = path.join(outDir, 'zsxq_digests_progress.json');
   const donePath = path.join(outDir, 'zsxq_digests_done.jsonl');
@@ -262,31 +281,57 @@ async function main() {
   const storageStatePath = path.resolve(__dirname, '..', config.storageStatePath || './storage_state.json');
 
   // Human-like pacing (avoid risk controls).
+  const paceProfiles = {
+    safe: {
+      maxPerHour: 32,
+      dailyMax: 600,
+      jitterMs: 5000,
+      session: { workMinMs: 30 * 60 * 1000, workMaxMs: 60 * 60 * 1000, restMinMs: 5 * 60 * 1000, restMaxMs: 12 * 60 * 1000 },
+      dwellWeights: [
+        { w: 0.86, min: 15 * 1000, max: 45 * 1000 },
+        { w: 0.12, min: 45 * 1000, max: 2 * 60 * 1000 },
+        { w: 0.02, min: 2 * 60 * 1000, max: 5 * 60 * 1000 }
+      ],
+      megaPause: { everyMin: 12, everyMax: 22, minMs: 2 * 60 * 1000, maxMs: 7 * 60 * 1000 }
+    },
+    balanced: {
+      maxPerHour: 36,
+      dailyMax: 600,
+      jitterMs: 3500,
+      session: { workMinMs: 35 * 60 * 1000, workMaxMs: 70 * 60 * 1000, restMinMs: 3 * 60 * 1000, restMaxMs: 8 * 60 * 1000 },
+      dwellWeights: [
+        { w: 0.9, min: 10 * 1000, max: 35 * 1000 },
+        { w: 0.09, min: 35 * 1000, max: 90 * 1000 },
+        { w: 0.01, min: 90 * 1000, max: 3 * 60 * 1000 }
+      ],
+      megaPause: { everyMin: 18, everyMax: 30, minMs: 90 * 1000, maxMs: 4 * 60 * 1000 }
+    },
+    fast: {
+      maxPerHour: 40,
+      dailyMax: 600,
+      jitterMs: 3000,
+      session: { workMinMs: 50 * 60 * 1000, workMaxMs: 80 * 60 * 1000, restMinMs: 1 * 60 * 1000, restMaxMs: 3 * 60 * 1000 },
+      dwellWeights: [
+        { w: 0.9, min: 8 * 1000, max: 28 * 1000 },
+        { w: 0.09, min: 30 * 1000, max: 80 * 1000 },
+        { w: 0.01, min: 90 * 1000, max: 180 * 1000 }
+      ],
+      megaPause: { everyMin: 25, everyMax: 40, minMs: 60 * 1000, maxMs: 180 * 1000 }
+    }
+  };
+  const pacingCfg = paceProfiles[paceProfile] || paceProfiles.safe;
+  console.log(`[collect] pace profile=${paceProfile} maxPerHour=${pacingCfg.maxPerHour} dailyMax=${pacingCfg.dailyMax}`);
+
   const pacer = createPacerFromConfig(config, {
     label: 'zsxq-digests',
     mode: 'human',
-    // Tuned "recommended" speed: faster than before, still pattern-broken.
-    maxPerHour: 36,
-    dailyMax: 600,
+    maxPerHour: pacingCfg.maxPerHour,
+    dailyMax: pacingCfg.dailyMax,
     allowedWindows: [{ start: '07:00', end: '23:59' }],
-    jitterMs: 6000,
-    session: {
-      workMinMs: 22 * 60 * 1000,
-      workMaxMs: 42 * 60 * 1000,
-      restMinMs: 3 * 60 * 1000,
-      restMaxMs: 8 * 60 * 1000
-    },
-    dwellWeights: [
-      { w: 0.82, min: 18 * 1000, max: 75 * 1000 },
-      { w: 0.15, min: 75 * 1000, max: 3 * 60 * 1000 },
-      { w: 0.03, min: 4 * 60 * 1000, max: 7 * 60 * 1000 }
-    ],
-    megaPause: {
-      everyMin: 10,
-      everyMax: 20,
-      minMs: 2 * 60 * 1000,
-      maxMs: 6 * 60 * 1000
-    }
+    jitterMs: pacingCfg.jitterMs,
+    session: pacingCfg.session,
+    dwellWeights: pacingCfg.dwellWeights,
+    megaPause: pacingCfg.megaPause
   });
   if (process.env.FAST === '1') {
     pacer.enabled = false;
@@ -389,10 +434,19 @@ async function main() {
           }
         } catch (err) {
           const msg = String(err && err.message ? err.message : err);
+          const em = err && err._meta ? err._meta : {};
+          const articleLink =
+            em.articleLink ||
+            (em.topicId ? `https://wx.zsxq.com/mweb/views/topicdetail/topicdetail.html?topic_id=${em.topicId}` : '');
           appendJsonl(errPath, {
             at: new Date().toISOString(),
             pageNo: progress.pageNo,
             indexInPage: i,
+            dateOnly,
+            title: em.title || parsed.title || '',
+            author: em.author || parsed.author || '',
+            topicId: em.topicId || '',
+            articleLink,
             error: msg
           });
 
@@ -403,7 +457,7 @@ async function main() {
             progress.indexInPage = i + 1;
             writeJsonAtomic(progressPath, progress);
             // Small jitter so we don't look like a tight loop on errors.
-            await sleep(700 + Math.floor(Math.random() * 1400));
+            await sleep(300 + Math.floor(Math.random() * 900));
             continue;
           }
 
